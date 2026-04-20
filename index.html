@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>紡織巡檢語音上傳</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #f5f5f5; display: flex; justify-content: center; padding: 40px 16px; }
+    .card { background: white; border-radius: 12px; padding: 32px; width: 100%; max-width: 560px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+    h1 { font-size: 1.4rem; margin-bottom: 8px; }
+    p { color: #666; font-size: 0.9rem; margin-bottom: 24px; }
+    .drop-zone {
+      border: 2px dashed #ccc; border-radius: 8px; padding: 40px;
+      text-align: center; cursor: pointer; transition: border-color 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color: #4a90e2; background: #f0f7ff; }
+    .drop-zone input { display: none; }
+    .drop-zone span { color: #888; font-size: 0.95rem; }
+    .file-list { margin-top: 16px; }
+    .file-item { display: flex; align-items: center; gap: 8px; padding: 8px; background: #f9f9f9; border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem; }
+    .file-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
+    .badge.pending { background: #eee; color: #666; }
+    .badge.processing { background: #fff3cd; color: #856404; }
+    .badge.ok { background: #d1e7dd; color: #0a3622; }
+    .badge.error { background: #f8d7da; color: #58151c; }
+    button {
+      margin-top: 20px; width: 100%; padding: 12px;
+      background: #4a90e2; color: white; border: none;
+      border-radius: 8px; font-size: 1rem; cursor: pointer;
+    }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+    .result-table { margin-top: 24px; width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .result-table th { background: #4a90e2; color: white; padding: 8px; text-align: left; }
+    .result-table td { padding: 7px 8px; border-bottom: 1px solid #eee; }
+    .result-table tr:nth-child(even) td { background: #f9f9f9; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>紡織巡檢語音上傳</h1>
+  <p>選擇或拖曳音檔，系統自動轉錄並寫入 Google Sheets</p>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".mp3,.m4a,.wav,.aac,.ogg" multiple>
+    <span>點擊選擇音檔，或拖曳到此處<br><small>支援 mp3、m4a、wav（可多選）</small></span>
+  </div>
+
+  <div class="file-list" id="fileList"></div>
+  <button id="uploadBtn" disabled>開始上傳處理</button>
+  <table class="result-table" id="resultTable" style="display:none">
+    <thead><tr><th>音檔</th><th>機台</th><th>左右</th><th>量測數據</th><th>狀態</th></tr></thead>
+    <tbody id="resultBody"></tbody>
+  </table>
+</div>
+
+<script>
+  const API_URL = "RENDER_API_URL_PLACEHOLDER";
+  const dropZone = document.getElementById("dropZone");
+  const fileInput = document.getElementById("fileInput");
+  const fileList = document.getElementById("fileList");
+  const uploadBtn = document.getElementById("uploadBtn");
+  const resultTable = document.getElementById("resultTable");
+  const resultBody = document.getElementById("resultBody");
+  let selectedFiles = [];
+
+  dropZone.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("dragover"); });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", e => {
+    e.preventDefault(); dropZone.classList.remove("dragover");
+    addFiles(Array.from(e.dataTransfer.files));
+  });
+  fileInput.addEventListener("change", () => addFiles(Array.from(fileInput.files)));
+
+  function addFiles(files) {
+    selectedFiles = [...selectedFiles, ...files];
+    renderFileList();
+    uploadBtn.disabled = selectedFiles.length === 0;
+  }
+
+  function renderFileList() {
+    fileList.innerHTML = selectedFiles.map((f, i) =>
+      `<div class="file-item" id="file-${i}">
+        <span class="name">${f.name}</span>
+        <span class="badge pending" id="badge-${i}">待處理</span>
+      </div>`
+    ).join("");
+  }
+
+  uploadBtn.addEventListener("click", async () => {
+    uploadBtn.disabled = true;
+    resultTable.style.display = "table";
+    resultBody.innerHTML = "";
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      document.getElementById(`badge-${i}`).className = "badge processing";
+      document.getElementById(`badge-${i}`).textContent = "處理中...";
+
+      const formData = new FormData();
+      formData.append("files", selectedFiles[i]);
+
+      try {
+        const res = await fetch(`${API_URL}/process`, { method: "POST", body: formData });
+        const json = await res.json();
+        const r = json.results[0];
+
+        if (r.status === "ok") {
+          document.getElementById(`badge-${i}`).className = "badge ok";
+          document.getElementById(`badge-${i}`).textContent = "完成";
+          const d = r.data;
+          resultBody.innerHTML += `<tr>
+            <td>${r.file}</td><td>${d["機台"]||""}</td>
+            <td>${d["左右邊"]||""}</td><td>${d["量測數據"]||""}</td>
+            <td style="color:green">✓</td></tr>`;
+        } else {
+          document.getElementById(`badge-${i}`).className = "badge error";
+          document.getElementById(`badge-${i}`).textContent = "錯誤";
+          resultBody.innerHTML += `<tr><td>${r.file}</td><td colspan="3">${r.message}</td><td style="color:red">✗</td></tr>`;
+        }
+      } catch(e) {
+        document.getElementById(`badge-${i}`).className = "badge error";
+        document.getElementById(`badge-${i}`).textContent = "錯誤";
+      }
+    }
+    uploadBtn.disabled = false;
+  });
+</script>
+</body>
+</html>
